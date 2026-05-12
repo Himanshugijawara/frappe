@@ -517,6 +517,17 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 		for col_idx in builder.metadata.column_map:
 			self.assertNotIn("bg_color", self._merge_cell_styles(builder, 4, col_idx))
 
+	def test_apply_zebra_stripes_with_font_color(self):
+		"""apply_zebra_stripes also applies font_color to striped cells when provided"""
+		builder = self._make_builder(num_data_rows=2)
+		builder.apply_zebra_stripes(color="#EEEEEE", font_color="333333")
+
+		# row 2 is the striped row in a 2-data-row layout
+		for col_idx in builder.metadata.column_map:
+			merged = self._merge_cell_styles(builder, 2, col_idx)
+			self.assertEqual(merged.get("bg_color"), "#EEEEEE")
+			self.assertEqual(merged.get("font_color"), "#333333")
+
 	def test_apply_zebra_stripes_invalid_color_raises(self):
 		builder = self._make_builder()
 		with self.assertRaises(frappe.ValidationError):
@@ -544,6 +555,86 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 			self.assertEqual(header_merged.get("bg_color"), "#4472C4")
 			self.assertEqual(header_merged.get("font_color"), "#FFFFFF")
 			self.assertEqual(header_merged.get("border"), 1)
+
+	def test_style_data_appearance(self):
+		"""style_data_appearance applies font/bg styles to every data cell"""
+		builder = self._make_builder(num_data_rows=3)
+		builder.style_data_appearance(font_color="222222", font_size=10)
+
+		for row_idx in builder.metadata.row_map:
+			for col_idx in builder.metadata.column_map:
+				merged = self._merge_cell_styles(builder, row_idx, col_idx)
+				self.assertEqual(merged.get("font_color"), "#222222")
+				self.assertEqual(merged.get("font_size"), 10)
+
+		# header should NOT be touched
+		self.assertEqual(self._merge_cell_styles(builder, builder.header_index, 0), {})
+
+	def test_style_data_appearance_noop_when_all_none(self):
+		builder = self._make_builder()
+		styles_before = len(builder.styles)
+		builder.style_data_appearance()
+		self.assertEqual(len(builder.styles), styles_before)
+
+	def test_style_data_appearance_invalid_font_size(self):
+		builder = self._make_builder()
+		with self.assertRaises(frappe.ValidationError):
+			builder.style_data_appearance(font_size=0)
+
+	def _make_builder_with_numeric(self, num_data_rows: int = 2) -> XLSXStyleBuilder:
+		"""Builder with a Data + Float + Int column for number-formatting tests."""
+		column_map = {
+			0: {"fieldname": "name", "fieldtype": "Data", "label": "Name"},
+			1: {"fieldname": "score", "fieldtype": "Float", "label": "Score"},
+			2: {"fieldname": "qty", "fieldtype": "Int", "label": "Qty"},
+		}
+		row_map = {i + 1: {"name": f"r{i}", "score": 1.5, "qty": 7} for i in range(num_data_rows)}
+		metadata = XLSXMetadata(column_map=column_map, row_map=row_map)
+		return XLSXStyleBuilder(metadata, default_styling=False)
+
+	def test_apply_number_formatting_precision_on_float(self):
+		builder = self._make_builder_with_numeric(num_data_rows=2)
+		builder.apply_number_formatting(precision=4)
+
+		# Float column gets "0.0000"
+		for row_idx in builder.metadata.row_map:
+			self.assertEqual(self._merge_cell_styles(builder, row_idx, 1).get("num_format"), "0.0000")
+			# Int column always gets "0"
+			self.assertEqual(self._merge_cell_styles(builder, row_idx, 2).get("num_format"), "0")
+			# Data column untouched
+			self.assertNotIn("num_format", self._merge_cell_styles(builder, row_idx, 0))
+
+	def test_apply_number_formatting_precision_zero(self):
+		builder = self._make_builder_with_numeric()
+		builder.apply_number_formatting(precision=0)
+		for row_idx in builder.metadata.row_map:
+			self.assertEqual(self._merge_cell_styles(builder, row_idx, 1).get("num_format"), "0")
+
+	def test_apply_number_formatting_right_align_only(self):
+		"""right_align_numeric=True without precision should only set alignment"""
+		builder = self._make_builder_with_numeric()
+		builder.apply_number_formatting(right_align_numeric=True)
+
+		for row_idx in builder.metadata.row_map:
+			self.assertEqual(self._merge_cell_styles(builder, row_idx, 1).get("align"), "right")
+			self.assertEqual(self._merge_cell_styles(builder, row_idx, 2).get("align"), "right")
+			self.assertNotIn("align", self._merge_cell_styles(builder, row_idx, 0))
+			# no num_format applied because precision was None
+			self.assertNotIn("num_format", self._merge_cell_styles(builder, row_idx, 1))
+
+	def test_apply_number_formatting_noop_when_both_unset(self):
+		builder = self._make_builder_with_numeric()
+		styles_before = len(builder.styles)
+		builder.apply_number_formatting()  # precision=None, right_align_numeric=False
+		self.assertEqual(len(builder.styles), styles_before)
+		self.assertEqual(builder.cell_styles, {})
+
+	def test_apply_number_formatting_invalid_precision_raises(self):
+		builder = self._make_builder_with_numeric()
+		with self.assertRaises(frappe.ValidationError):
+			builder.apply_number_formatting(precision=-1)
+		with self.assertRaises(frappe.ValidationError):
+			builder.apply_number_formatting(precision=21)
 
 
 class TestApplyUserStyles(UnitTestCase):
@@ -638,6 +729,61 @@ class TestApplyUserStyles(UnitTestCase):
 		builder = self._make_builder()
 		with self.assertRaises(frappe.ValidationError):
 			apply_user_styles(builder, {"header": {"bg_color": "invalid"}})
+
+	def test_data_section_applies_via_apply_user_styles(self):
+		builder = self._make_builder(num_data_rows=2)
+		apply_user_styles(
+			builder,
+			{"data": {"bg_color": "#FAFAFA", "font_color": "#222222", "font_size": 10}},
+		)
+		for row_idx in builder.metadata.row_map:
+			merged = self._merge_cell_styles(builder, row_idx)
+			self.assertEqual(merged.get("bg_color"), "#FAFAFA")
+			self.assertEqual(merged.get("font_color"), "#222222")
+			self.assertEqual(merged.get("font_size"), 10)
+
+	def test_zebra_font_color_via_apply_user_styles(self):
+		builder = self._make_builder(num_data_rows=2)
+		apply_user_styles(
+			builder,
+			{"zebra_stripes": {"color": "#EEEEEE", "font_color": "#444444"}},
+		)
+		# striped row (row 2) should have both bg + font color
+		merged = self._merge_cell_styles(builder, 2)
+		self.assertEqual(merged.get("bg_color"), "#EEEEEE")
+		self.assertEqual(merged.get("font_color"), "#444444")
+
+	def test_number_formatting_applies_via_apply_user_styles(self):
+		"""apply_user_styles forwards precision + right-align to numeric columns"""
+		column_map = {
+			0: {"fieldname": "name", "fieldtype": "Data", "label": "Name"},
+			1: {"fieldname": "amount", "fieldtype": "Float", "label": "Amount"},
+		}
+		row_map = {1: {"name": "a", "amount": 1.5}, 2: {"name": "b", "amount": 2.5}}
+		metadata = XLSXMetadata(column_map=column_map, row_map=row_map)
+		builder = XLSXStyleBuilder(metadata, default_styling=False)
+
+		apply_user_styles(
+			builder,
+			{"number_formatting": {"precision": 3, "right_align_numeric": True}},
+		)
+
+		for row_idx in row_map:
+			merged = self._merge_cell_styles(builder, row_idx, 1)
+			self.assertEqual(merged.get("num_format"), "0.000")
+			self.assertEqual(merged.get("align"), "right")
+
+	def test_number_formatting_string_precision_coerced(self):
+		"""apply_user_styles tolerates string-typed precision from JSON"""
+		column_map = {
+			0: {"fieldname": "v", "fieldtype": "Float", "label": "V"},
+		}
+		row_map = {1: {"v": 1.0}}
+		metadata = XLSXMetadata(column_map=column_map, row_map=row_map)
+		builder = XLSXStyleBuilder(metadata, default_styling=False)
+
+		apply_user_styles(builder, {"number_formatting": {"precision": "2"}})
+		self.assertEqual(self._merge_cell_styles(builder, 1, 0).get("num_format"), "0.00")
 
 	def test_get_default_xlsx_styles_with_user_styles(self):
 		"""End-to-end: get_default_xlsx_styles honors user_styles kwarg"""

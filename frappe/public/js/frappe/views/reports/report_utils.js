@@ -185,12 +185,20 @@ frappe.report_utils = {
 				fieldname: "export_in_background",
 				fieldtype: "Check",
 			},
+			// ─── Excel Styling (everything below collapses together) ────────
 			{
 				fieldtype: "Section Break",
 				fieldname: "xlsx_style_section",
 				label: __("Excel Styling"),
 				collapsible: 1,
 				collapsible_depends_on: "eval:1",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			// Header subsection
+			{
+				fieldtype: "HTML",
+				fieldname: "xlsx_header_heading",
+				options: `<div class="text-muted small font-weight-bold" style="text-transform:uppercase;letter-spacing:0.5px;margin-top:4px;">${__("Header")}</div>`,
 				depends_on: "eval:doc.file_format=='Excel'",
 			},
 			{
@@ -208,18 +216,6 @@ frappe.report_utils = {
 				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_header_enable",
 			},
 			{
-				fieldtype: "Int",
-				fieldname: "xlsx_header_font_size",
-				label: __("Header font size"),
-				default: 11,
-				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_header_enable",
-			},
-			{
-				fieldtype: "Column Break",
-				fieldname: "xlsx_style_col_break_1",
-				depends_on: "eval:doc.file_format=='Excel'",
-			},
-			{
 				fieldtype: "Color",
 				fieldname: "xlsx_header_font_color",
 				label: __("Header text color"),
@@ -227,8 +223,52 @@ frappe.report_utils = {
 				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_header_enable",
 			},
 			{
-				fieldtype: "Section Break",
-				fieldname: "xlsx_borders_section",
+				fieldtype: "Int",
+				fieldname: "xlsx_header_font_size",
+				label: __("Header font size"),
+				default: 11,
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_header_enable",
+			},
+			// Data cells subsection
+			{
+				fieldtype: "HTML",
+				fieldname: "xlsx_data_heading",
+				options: `<hr style="margin:12px 0 4px 0;"><div class="text-muted small font-weight-bold" style="text-transform:uppercase;letter-spacing:0.5px;">${__("Data Cells")}</div>`,
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Check",
+				fieldname: "xlsx_style_data_enable",
+				label: __("Customize data cells"),
+				default: 0,
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Color",
+				fieldname: "xlsx_data_bg_color",
+				label: __("Data background"),
+				default: "#FFFFFF",
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_data_enable",
+			},
+			{
+				fieldtype: "Color",
+				fieldname: "xlsx_data_font_color",
+				label: __("Data text color"),
+				default: "#222222",
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_data_enable",
+			},
+			{
+				fieldtype: "Int",
+				fieldname: "xlsx_data_font_size",
+				label: __("Data font size"),
+				default: 11,
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_data_enable",
+			},
+			// Borders subsection
+			{
+				fieldtype: "HTML",
+				fieldname: "xlsx_borders_heading",
+				options: `<hr style="margin:12px 0 4px 0;"><div class="text-muted small font-weight-bold" style="text-transform:uppercase;letter-spacing:0.5px;">${__("Borders")}</div>`,
 				depends_on: "eval:doc.file_format=='Excel'",
 			},
 			{
@@ -247,11 +287,6 @@ frappe.report_utils = {
 				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_borders_enable",
 			},
 			{
-				fieldtype: "Column Break",
-				fieldname: "xlsx_style_col_break_2",
-				depends_on: "eval:doc.file_format=='Excel'",
-			},
-			{
 				fieldtype: "Select",
 				fieldname: "xlsx_border_scope",
 				label: __("Apply borders to"),
@@ -263,9 +298,11 @@ frappe.report_utils = {
 				default: "all",
 				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_borders_enable",
 			},
+			// Zebra subsection
 			{
-				fieldtype: "Section Break",
-				fieldname: "xlsx_zebra_section",
+				fieldtype: "HTML",
+				fieldname: "xlsx_zebra_heading",
+				options: `<hr style="margin:12px 0 4px 0;"><div class="text-muted small font-weight-bold" style="text-transform:uppercase;letter-spacing:0.5px;">${__("Alternate Row Colors")}</div>`,
 				depends_on: "eval:doc.file_format=='Excel'",
 			},
 			{
@@ -278,13 +315,54 @@ frappe.report_utils = {
 			{
 				fieldtype: "Color",
 				fieldname: "xlsx_zebra_color",
-				label: __("Stripe color"),
+				label: __("Stripe background"),
 				default: "#F2F2F2",
 				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_zebra_enable",
 			},
 			{
-				fieldtype: "Section Break",
-				fieldname: "xlsx_preview_section",
+				fieldtype: "Color",
+				fieldname: "xlsx_zebra_font_color",
+				label: __("Stripe text color"),
+				description: __("Optional. Leave blank to keep the data text color."),
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_zebra_enable",
+			},
+			// Number formatting subsection
+			{
+				fieldtype: "HTML",
+				fieldname: "xlsx_numfmt_heading",
+				options: `<hr style="margin:12px 0 4px 0;"><div class="text-muted small font-weight-bold" style="text-transform:uppercase;letter-spacing:0.5px;">${__("Number Formatting")}</div>`,
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Check",
+				fieldname: "xlsx_numfmt_enable",
+				label: __("Customize numeric columns"),
+				description: __(
+					"Applies to Currency, Float, Percent and Int columns"
+				),
+				default: 0,
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Int",
+				fieldname: "xlsx_numfmt_precision",
+				label: __("Decimal places"),
+				default: 2,
+				description: __("0–20. Integer columns always render as whole numbers."),
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_numfmt_enable",
+			},
+			{
+				fieldtype: "Check",
+				fieldname: "xlsx_numfmt_right_align",
+				label: __("Right-align numeric columns"),
+				default: 1,
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_numfmt_enable",
+			},
+			// Live preview
+			{
+				fieldtype: "HTML",
+				fieldname: "xlsx_preview_heading",
+				options: `<hr style="margin:12px 0 4px 0;"><div class="text-muted small font-weight-bold" style="text-transform:uppercase;letter-spacing:0.5px;">${__("Preview")}</div>`,
 				depends_on: "eval:doc.file_format=='Excel'",
 			},
 			{
@@ -386,43 +464,82 @@ frappe.report_utils = {
 			const v = dialog.get_values(true) || {};
 
 			const header_enabled = !!v.xlsx_style_header_enable;
+			const data_enabled = !!v.xlsx_style_data_enable;
 			const borders_enabled = !!v.xlsx_borders_enable;
 			const zebra_enabled = !!v.xlsx_zebra_enable;
+			const numfmt_enabled = !!v.xlsx_numfmt_enable;
 
+			// header style
 			const header_bg = header_enabled ? v.xlsx_header_bg_color || "#4472C4" : "transparent";
 			const header_fg = header_enabled ? v.xlsx_header_font_color || "#FFFFFF" : "inherit";
 			const header_size = header_enabled ? cint(v.xlsx_header_font_size) || 11 : 11;
 
+			// data style
+			const data_bg = data_enabled ? v.xlsx_data_bg_color || "#FFFFFF" : "transparent";
+			const data_fg = data_enabled ? v.xlsx_data_font_color || "#222222" : "inherit";
+			const data_size = data_enabled ? cint(v.xlsx_data_font_size) || 11 : 11;
+
+			// borders
 			const border_scope = v.xlsx_border_scope || "all";
 			const header_has_border =
 				borders_enabled && (border_scope === "all" || border_scope === "header_only");
 			const data_has_border =
 				borders_enabled && (border_scope === "all" || border_scope === "data_only");
-
 			const border_css = "1px solid #6c757d";
 			const header_border_css = header_has_border ? border_css : "none";
 			const data_border_css = data_has_border ? border_css : "none";
-			const zebra_color = zebra_enabled ? v.xlsx_zebra_color || "#F2F2F2" : "transparent";
+
+			// zebra
+			const zebra_color = zebra_enabled ? v.xlsx_zebra_color || "#F2F2F2" : null;
+			const zebra_font = zebra_enabled ? v.xlsx_zebra_font_color || null : null;
+
+			// number formatting
+			const right_align_numbers = numfmt_enabled && !!v.xlsx_numfmt_right_align;
+			const numeric_align = right_align_numbers ? "right" : "left";
+			let precision = 2;
+			if (numfmt_enabled) {
+				const p = cint(v.xlsx_numfmt_precision);
+				if (p >= 0 && p <= 20) precision = p;
+			}
+			const fmt_float = (n) => (numfmt_enabled ? n.toFixed(precision) : n.toString());
 
 			const cell_pad = "padding: 6px 10px;";
 			const header_style = `background:${header_bg};color:${header_fg};font-weight:600;font-size:${header_size}px;border:${header_border_css};${cell_pad}`;
-			const row_style = (striped) =>
-				`background:${striped ? zebra_color : "transparent"};border:${data_border_css};${cell_pad}`;
+			const data_cell_style = (striped, align = "left") => {
+				const bg = striped && zebra_color ? zebra_color : data_bg;
+				const fg = striped && zebra_font ? zebra_font : data_fg;
+				return `background:${bg};color:${fg};font-size:${data_size}px;border:${data_border_css};text-align:${align};${cell_pad}`;
+			};
+
+			// header alignment matches data alignment for numeric columns (mirrors XLSXStyleBuilder)
+			const header_style_aligned = (align = "left") =>
+				header_style + `text-align:${align};`;
 
 			wrapper.html(`
-				<div class="text-muted small" style="margin-bottom:6px;">${__("Preview")}</div>
 				<table style="border-collapse:collapse;width:100%;font-size:13px;">
 					<thead>
 						<tr>
-							<th style="${header_style}">${__("Name")}</th>
-							<th style="${header_style}">${__("Score")}</th>
-							<th style="${header_style}">${__("Status")}</th>
+							<th style="${header_style_aligned("left")}">${__("Name")}</th>
+							<th style="${header_style_aligned(numeric_align)}">${__("Score")}</th>
+							<th style="${header_style_aligned("left")}">${__("Status")}</th>
 						</tr>
 					</thead>
 					<tbody>
-						<tr><td style="${row_style(false)}">Alpha</td><td style="${row_style(false)}">100</td><td style="${row_style(false)}">Open</td></tr>
-						<tr><td style="${row_style(true)}">Beta</td><td style="${row_style(true)}">200</td><td style="${row_style(true)}">Closed</td></tr>
-						<tr><td style="${row_style(false)}">Gamma</td><td style="${row_style(false)}">300</td><td style="${row_style(false)}">Open</td></tr>
+						<tr>
+							<td style="${data_cell_style(false, "left")}">Alpha</td>
+							<td style="${data_cell_style(false, numeric_align)}">${fmt_float(100)}</td>
+							<td style="${data_cell_style(false, "left")}">Open</td>
+						</tr>
+						<tr>
+							<td style="${data_cell_style(true, "left")}">Beta</td>
+							<td style="${data_cell_style(true, numeric_align)}">${fmt_float(200.5)}</td>
+							<td style="${data_cell_style(true, "left")}">Closed</td>
+						</tr>
+						<tr>
+							<td style="${data_cell_style(false, "left")}">Gamma</td>
+							<td style="${data_cell_style(false, numeric_align)}">${fmt_float(300.123)}</td>
+							<td style="${data_cell_style(false, "left")}">Open</td>
+						</tr>
 					</tbody>
 				</table>
 			`);
@@ -452,11 +569,19 @@ frappe.report_utils = {
 			"xlsx_header_bg_color",
 			"xlsx_header_font_color",
 			"xlsx_header_font_size",
+			"xlsx_style_data_enable",
+			"xlsx_data_bg_color",
+			"xlsx_data_font_color",
+			"xlsx_data_font_size",
 			"xlsx_borders_enable",
 			"xlsx_border_style",
 			"xlsx_border_scope",
 			"xlsx_zebra_enable",
 			"xlsx_zebra_color",
+			"xlsx_zebra_font_color",
+			"xlsx_numfmt_enable",
+			"xlsx_numfmt_precision",
+			"xlsx_numfmt_right_align",
 		];
 		xlsx_preview_fields.forEach((fieldname) => {
 			const field = dialog.fields_dict[fieldname];
@@ -496,6 +621,15 @@ frappe.report_utils = {
 			if (Object.keys(header).length) style.header = header;
 		}
 
+		if (values.xlsx_style_data_enable) {
+			const data = {};
+			if (values.xlsx_data_bg_color) data.bg_color = values.xlsx_data_bg_color;
+			if (values.xlsx_data_font_color) data.font_color = values.xlsx_data_font_color;
+			const font_size = cint(values.xlsx_data_font_size);
+			if (font_size > 0) data.font_size = font_size;
+			if (Object.keys(data).length) style.data = data;
+		}
+
 		if (values.xlsx_borders_enable) {
 			style.borders = {
 				style: values.xlsx_border_style || "thin",
@@ -504,7 +638,17 @@ frappe.report_utils = {
 		}
 
 		if (values.xlsx_zebra_enable && values.xlsx_zebra_color) {
-			style.zebra_stripes = { color: values.xlsx_zebra_color };
+			const zebra = { color: values.xlsx_zebra_color };
+			if (values.xlsx_zebra_font_color) zebra.font_color = values.xlsx_zebra_font_color;
+			style.zebra_stripes = zebra;
+		}
+
+		if (values.xlsx_numfmt_enable) {
+			const numfmt = {};
+			const precision = cint(values.xlsx_numfmt_precision);
+			if (precision >= 0 && precision <= 20) numfmt.precision = precision;
+			if (values.xlsx_numfmt_right_align) numfmt.right_align_numeric = true;
+			if (Object.keys(numfmt).length) style.number_formatting = numfmt;
 		}
 
 		return Object.keys(style).length ? style : null;

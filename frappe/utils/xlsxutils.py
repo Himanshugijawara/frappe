@@ -460,7 +460,103 @@ class XLSXStyleBuilder:
 
 		return self
 
-	def apply_zebra_stripes(self, color: str = "#F2F2F2"):
+	def style_data_appearance(
+		self,
+		bg_color: str | None = None,
+		font_color: str | None = None,
+		font_size: int | None = None,
+	):
+		"""
+		Apply visual appearance overrides to every data cell.
+
+		Mirrors `style_header_appearance` but targets the data rows. Useful when
+		the user wants to bump up the base font size or change text color for
+		readability without touching the default fieldtype-based formatting.
+
+		Args:
+			bg_color: Background hex color (e.g. "#FFFFFF" or "FFFFFF").
+			font_color: Font hex color.
+			font_size: Font size in points (positive integer).
+		"""
+		style: dict = {}
+
+		if bg_color:
+			style["bg_color"] = self._normalize_color(bg_color)
+		if font_color:
+			style["font_color"] = self._normalize_color(font_color)
+		if font_size is not None:
+			if not isinstance(font_size, int) or font_size <= 0:
+				frappe.throw(_("XLSX font_size must be a positive integer"))
+			style["font_size"] = font_size
+
+		if not style:
+			return self
+
+		style_id = self.register_style(style)
+		for row_idx in self.metadata.row_map:
+			for col_idx in self.metadata.column_map:
+				self.style_cell(row_idx, col_idx, style_id)
+		return self
+
+	NUMERIC_FIELDTYPES_FOR_FORMATTING: ClassVar[set[str]] = {"Currency", "Float", "Percent", "Int"}
+
+	def apply_number_formatting(
+		self,
+		precision: int | None = None,
+		right_align_numeric: bool = False,
+	):
+		"""
+		User override for number formatting on numeric columns.
+
+		The default styling pipeline already applies sensible num_format strings
+		(based on system precision settings) and right-aligns numeric header
+		cells. This method lets the user explicitly override the decimal
+		precision and/or force right-alignment on the data cells themselves.
+
+		Args:
+			precision: Number of decimal places for Float / Currency / Percent
+				columns. Int columns always use "0" (no decimals). When None,
+				no precision override is applied.
+			right_align_numeric: When True, every data cell of a numeric column
+				receives `align: right`.
+		"""
+		if precision is not None:
+			if not isinstance(precision, int) or precision < 0 or precision > 20:
+				frappe.throw(_("XLSX precision must be an integer between 0 and 20"))
+
+		# pre-register the styles we may reuse across columns
+		precision_format_id_float: int | None = None
+		precision_format_id_int: int | None = None
+		if precision is not None:
+			float_fmt = "0" + (("." + "0" * precision) if precision > 0 else "")
+			precision_format_id_float = self.register_style({"num_format": float_fmt})
+			precision_format_id_int = self.register_style({"num_format": "0"})
+
+		align_id: int | None = None
+		if right_align_numeric:
+			align_id = self.register_style({"align": "right"})
+
+		if precision is None and align_id is None:
+			return self
+
+		for col_idx, col in self.metadata.column_map.items():
+			fieldtype = col.get("fieldtype")
+			if fieldtype not in self.NUMERIC_FIELDTYPES_FOR_FORMATTING:
+				continue
+
+			fmt_id = None
+			if precision is not None:
+				fmt_id = precision_format_id_int if fieldtype == "Int" else precision_format_id_float
+
+			for row_idx in self.metadata.row_map:
+				if fmt_id is not None:
+					self.style_cell(row_idx, col_idx, fmt_id)
+				if align_id is not None:
+					self.style_cell(row_idx, col_idx, align_id)
+
+		return self
+
+	def apply_zebra_stripes(self, color: str = "#F2F2F2", font_color: str | None = None):
 		"""
 		Apply alternating background color to data rows.
 
@@ -470,8 +566,13 @@ class XLSXStyleBuilder:
 
 		Args:
 			color: Background hex color for striped rows.
+			font_color: Optional font hex color for striped rows. When None,
+				the surrounding text color is left untouched.
 		"""
-		style_id = self.register_style({"bg_color": self._normalize_color(color)})
+		style: dict = {"bg_color": self._normalize_color(color)}
+		if font_color:
+			style["font_color"] = self._normalize_color(font_color)
+		style_id = self.register_style(style)
 
 		skip_last_row = self.metadata.has_total_row
 		last_row_index = self.last_row_index
@@ -591,12 +692,22 @@ def apply_user_styles(builder: XLSXStyleBuilder, options: dict | None) -> XLSXSt
 				"font_color": "#FFFFFF",
 				"font_size": 12,
 			},
+			"data": {
+				"bg_color": "#FFFFFF",
+				"font_color": "#222222",
+				"font_size": 11,
+			},
 			"borders": {
 				"style": "thin",   # one of XLSXStyleBuilder.BORDER_STYLE_MAP
 				"scope": "all",    # "all" | "header_only" | "data_only"
 			},
 			"zebra_stripes": {
 				"color": "#F2F2F2",
+				"font_color": "#222222",  # optional
+			},
+			"number_formatting": {
+				"precision": 2,                # 0..20, decimals for Float/Currency/Percent
+				"right_align_numeric": True,   # force right-align on numeric data cells
 			},
 		}
 
@@ -618,6 +729,13 @@ def apply_user_styles(builder: XLSXStyleBuilder, options: dict | None) -> XLSXSt
 			font_size=header.get("font_size"),
 		)
 
+	if (data := options.get("data")) and isinstance(data, dict):
+		builder.style_data_appearance(
+			bg_color=data.get("bg_color"),
+			font_color=data.get("font_color"),
+			font_size=data.get("font_size"),
+		)
+
 	if (borders := options.get("borders")) and isinstance(borders, dict):
 		builder.apply_borders(
 			border_style=borders.get("style", "thin"),
@@ -626,7 +744,16 @@ def apply_user_styles(builder: XLSXStyleBuilder, options: dict | None) -> XLSXSt
 
 	if (zebra := options.get("zebra_stripes")) and isinstance(zebra, dict):
 		if color := zebra.get("color"):
-			builder.apply_zebra_stripes(color=color)
+			builder.apply_zebra_stripes(color=color, font_color=zebra.get("font_color"))
+
+	if (numfmt := options.get("number_formatting")) and isinstance(numfmt, dict):
+		precision = numfmt.get("precision")
+		if isinstance(precision, str) and precision.strip().isdigit():
+			precision = int(precision)
+		builder.apply_number_formatting(
+			precision=precision if isinstance(precision, int) else None,
+			right_align_numeric=bool(numfmt.get("right_align_numeric")),
+		)
 
 	return builder
 
