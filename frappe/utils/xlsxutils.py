@@ -411,7 +411,9 @@ class XLSXStyleBuilder:
 		if not style:
 			return self
 
-		self.style_row(self.header_index, self.register_style(style))
+		style_id = self.register_style(style)
+		for col_idx in self.metadata.column_map:
+			self.style_cell(self.header_index, col_idx, style_id)
 		return self
 
 	def apply_borders(
@@ -445,13 +447,16 @@ class XLSXStyleBuilder:
 			return self
 
 		border_id = self.register_style({"border": border_value})
+		col_indices = list(self.metadata.column_map.keys())
 
 		if scope in ("all", "header_only"):
-			self.style_row(self.header_index, border_id)
+			for col_idx in col_indices:
+				self.style_cell(self.header_index, col_idx, border_id)
 
 		if scope in ("all", "data_only"):
 			for row_idx in self.metadata.row_map:
-				self.style_row(row_idx, border_id)
+				for col_idx in col_indices:
+					self.style_cell(row_idx, col_idx, border_id)
 
 		return self
 
@@ -470,13 +475,15 @@ class XLSXStyleBuilder:
 
 		skip_last_row = self.metadata.has_total_row
 		last_row_index = self.last_row_index
+		col_indices = list(self.metadata.column_map.keys())
 
 		for i, row_idx in enumerate(sorted(self.metadata.row_map.keys())):
 			if skip_last_row and row_idx == last_row_index:
 				continue
 			# stripe every second row (leave 1st, 3rd, ... unstriped)
 			if i % 2 == 1:
-				self.style_row(row_idx, style_id)
+				for col_idx in col_indices:
+					self.style_cell(row_idx, col_idx, style_id)
 
 		return self
 

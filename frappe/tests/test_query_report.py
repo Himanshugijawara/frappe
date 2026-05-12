@@ -390,10 +390,14 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 		return XLSXStyleBuilder(metadata, default_styling=False)
 
 	@staticmethod
-	def _merge_row_styles(builder: XLSXStyleBuilder, row_idx: int) -> dict:
-		"""Merge all style dicts applied to a row into one dict."""
+	def _merge_cell_styles(builder: XLSXStyleBuilder, row_idx: int, col_idx: int = 0) -> dict:
+		"""Merge all style dicts applied to a single cell into one dict.
+
+		User-style methods apply styling per cell across actual data columns only,
+		so assertions inspect a representative cell (default: first column).
+		"""
 		merged: dict = {}
-		for sid in builder.row_styles.get(row_idx, []):
+		for sid in builder.cell_styles.get((row_idx, col_idx), []):
 			merged.update(builder.styles[sid])
 		return merged
 
@@ -402,10 +406,12 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 		builder = self._make_builder()
 		builder.style_header_appearance(bg_color="#4472C4", font_color="FFFFFF", font_size=12)
 
-		merged = self._merge_row_styles(builder, builder.header_index)
-		self.assertEqual(merged.get("bg_color"), "#4472C4")
-		self.assertEqual(merged.get("font_color"), "#FFFFFF")  # normalized with '#'
-		self.assertEqual(merged.get("font_size"), 12)
+		# every actual column should receive the user header style
+		for col_idx in builder.metadata.column_map:
+			merged = self._merge_cell_styles(builder, builder.header_index, col_idx)
+			self.assertEqual(merged.get("bg_color"), "#4472C4")
+			self.assertEqual(merged.get("font_color"), "#FFFFFF")  # normalized with '#'
+			self.assertEqual(merged.get("font_size"), 12)
 
 	def test_style_header_appearance_noop_when_all_none(self):
 		"""style_header_appearance with no args registers no new style"""
@@ -422,39 +428,59 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 			builder.style_header_appearance(font_size=-5)
 
 	def test_apply_borders_default_all_scope(self):
-		"""apply_borders('thin') applies border to header + every data row"""
+		"""apply_borders('thin') applies border to every cell of header + every data row"""
 		builder = self._make_builder(num_data_rows=3)
 		builder.apply_borders(border_style="thin")
 
-		header_merged = self._merge_row_styles(builder, builder.header_index)
-		self.assertEqual(header_merged.get("border"), 1)
+		for col_idx in builder.metadata.column_map:
+			self.assertEqual(
+				self._merge_cell_styles(builder, builder.header_index, col_idx).get("border"),
+				1,
+			)
 
 		for row_idx in builder.metadata.row_map:
-			merged = self._merge_row_styles(builder, row_idx)
-			self.assertEqual(merged.get("border"), 1, f"row {row_idx} missing border")
+			for col_idx in builder.metadata.column_map:
+				self.assertEqual(
+					self._merge_cell_styles(builder, row_idx, col_idx).get("border"),
+					1,
+					f"cell ({row_idx}, {col_idx}) missing border",
+				)
 
 	def test_apply_borders_header_only(self):
 		builder = self._make_builder(num_data_rows=2)
 		builder.apply_borders(border_style="medium", scope="header_only")
 
-		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 2)
+		for col_idx in builder.metadata.column_map:
+			self.assertEqual(
+				self._merge_cell_styles(builder, builder.header_index, col_idx).get("border"),
+				2,
+			)
+		# data cells should NOT have border
 		for row_idx in builder.metadata.row_map:
-			self.assertNotIn("border", self._merge_row_styles(builder, row_idx))
+			for col_idx in builder.metadata.column_map:
+				self.assertNotIn("border", self._merge_cell_styles(builder, row_idx, col_idx))
 
 	def test_apply_borders_data_only(self):
 		builder = self._make_builder(num_data_rows=2)
 		builder.apply_borders(border_style="thick", scope="data_only")
 
-		self.assertNotIn("border", self._merge_row_styles(builder, builder.header_index))
+		for col_idx in builder.metadata.column_map:
+			self.assertNotIn(
+				"border",
+				self._merge_cell_styles(builder, builder.header_index, col_idx),
+			)
 		for row_idx in builder.metadata.row_map:
-			self.assertEqual(self._merge_row_styles(builder, row_idx).get("border"), 5)
+			for col_idx in builder.metadata.column_map:
+				self.assertEqual(
+					self._merge_cell_styles(builder, row_idx, col_idx).get("border"), 5
+				)
 
 	def test_apply_borders_none_is_noop(self):
 		builder = self._make_builder()
 		styles_before = len(builder.styles)
 		builder.apply_borders(border_style="none")
 		self.assertEqual(len(builder.styles), styles_before)
-		self.assertEqual(builder.row_styles, {})
+		self.assertEqual(builder.cell_styles, {})
 
 	def test_apply_borders_invalid_style_raises(self):
 		builder = self._make_builder()
@@ -464,25 +490,32 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 	def test_apply_borders_accepts_int(self):
 		builder = self._make_builder(num_data_rows=1)
 		builder.apply_borders(border_style=2)
-		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 2)
+		for col_idx in builder.metadata.column_map:
+			self.assertEqual(
+				self._merge_cell_styles(builder, builder.header_index, col_idx).get("border"),
+				2,
+			)
 
 	def test_apply_zebra_stripes(self):
-		"""apply_zebra_stripes stripes every 2nd data row"""
+		"""apply_zebra_stripes stripes every 2nd data row across actual columns"""
 		builder = self._make_builder(num_data_rows=4)  # rows 1,2,3,4
 		builder.apply_zebra_stripes(color="#EEEEEE")
 
+		cols = list(builder.metadata.column_map.keys())
 		# i=0 (row 1) unstriped, i=1 (row 2) striped, i=2 (row 3) unstriped, i=3 (row 4) striped
-		self.assertNotIn("bg_color", self._merge_row_styles(builder, 1))
-		self.assertEqual(self._merge_row_styles(builder, 2).get("bg_color"), "#EEEEEE")
-		self.assertNotIn("bg_color", self._merge_row_styles(builder, 3))
-		self.assertEqual(self._merge_row_styles(builder, 4).get("bg_color"), "#EEEEEE")
+		for col_idx in cols:
+			self.assertNotIn("bg_color", self._merge_cell_styles(builder, 1, col_idx))
+			self.assertEqual(self._merge_cell_styles(builder, 2, col_idx).get("bg_color"), "#EEEEEE")
+			self.assertNotIn("bg_color", self._merge_cell_styles(builder, 3, col_idx))
+			self.assertEqual(self._merge_cell_styles(builder, 4, col_idx).get("bg_color"), "#EEEEEE")
 
 	def test_apply_zebra_stripes_skips_total_row(self):
 		"""When has_total_row is set, the last row never receives stripes"""
 		builder = self._make_builder(num_data_rows=4, has_total_row=True)
 		builder.apply_zebra_stripes(color="F2F2F2")
 
-		self.assertNotIn("bg_color", self._merge_row_styles(builder, 4))
+		for col_idx in builder.metadata.column_map:
+			self.assertNotIn("bg_color", self._merge_cell_styles(builder, 4, col_idx))
 
 	def test_apply_zebra_stripes_invalid_color_raises(self):
 		builder = self._make_builder()
@@ -506,10 +539,11 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 		)
 		self.assertIs(result, builder)
 
-		header_merged = self._merge_row_styles(builder, builder.header_index)
-		self.assertEqual(header_merged.get("bg_color"), "#4472C4")
-		self.assertEqual(header_merged.get("font_color"), "#FFFFFF")
-		self.assertEqual(header_merged.get("border"), 1)
+		for col_idx in builder.metadata.column_map:
+			header_merged = self._merge_cell_styles(builder, builder.header_index, col_idx)
+			self.assertEqual(header_merged.get("bg_color"), "#4472C4")
+			self.assertEqual(header_merged.get("font_color"), "#FFFFFF")
+			self.assertEqual(header_merged.get("border"), 1)
 
 
 class TestApplyUserStyles(UnitTestCase):
@@ -526,9 +560,9 @@ class TestApplyUserStyles(UnitTestCase):
 		return XLSXStyleBuilder(metadata, default_styling=False)
 
 	@staticmethod
-	def _merge_row_styles(builder: XLSXStyleBuilder, row_idx: int) -> dict:
+	def _merge_cell_styles(builder: XLSXStyleBuilder, row_idx: int, col_idx: int = 0) -> dict:
 		merged: dict = {}
-		for sid in builder.row_styles.get(row_idx, []):
+		for sid in builder.cell_styles.get((row_idx, col_idx), []):
 			merged.update(builder.styles[sid])
 		return merged
 
@@ -542,12 +576,12 @@ class TestApplyUserStyles(UnitTestCase):
 	def test_empty_options_is_noop(self):
 		builder = self._make_builder()
 		apply_user_styles(builder, {})
-		self.assertEqual(builder.row_styles, {})
+		self.assertEqual(builder.cell_styles, {})
 
 	def test_non_dict_options_is_noop(self):
 		builder = self._make_builder()
 		apply_user_styles(builder, "not-a-dict")  # type: ignore[arg-type]
-		self.assertEqual(builder.row_styles, {})
+		self.assertEqual(builder.cell_styles, {})
 
 	def test_full_options_apply_all_three_sections(self):
 		builder = self._make_builder(num_data_rows=4)
@@ -560,14 +594,14 @@ class TestApplyUserStyles(UnitTestCase):
 			},
 		)
 
-		header_merged = self._merge_row_styles(builder, builder.header_index)
+		header_merged = self._merge_cell_styles(builder, builder.header_index)
 		self.assertEqual(header_merged.get("bg_color"), "#4472C4")
 		self.assertEqual(header_merged.get("font_color"), "#FFFFFF")
 		self.assertEqual(header_merged.get("font_size"), 14)
 		self.assertEqual(header_merged.get("border"), 2)
 
 		# at least one data row should have border + a striped row exists
-		row2_merged = self._merge_row_styles(builder, 2)
+		row2_merged = self._merge_cell_styles(builder, 2)
 		self.assertEqual(row2_merged.get("border"), 2)
 		self.assertEqual(row2_merged.get("bg_color"), "#F2F2F2")
 
@@ -576,9 +610,9 @@ class TestApplyUserStyles(UnitTestCase):
 		apply_user_styles(builder, {"borders": {"style": "thin"}})
 
 		# borders applied
-		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 1)
+		header_merged = self._merge_cell_styles(builder, builder.header_index)
+		self.assertEqual(header_merged.get("border"), 1)
 		# header appearance NOT applied
-		header_merged = self._merge_row_styles(builder, builder.header_index)
 		self.assertNotIn("bg_color", header_merged)
 		self.assertNotIn("font_size", header_merged)
 
@@ -586,19 +620,19 @@ class TestApplyUserStyles(UnitTestCase):
 		"""borders={} is treated as no-op so users must explicitly opt in via the dialog"""
 		builder = self._make_builder(num_data_rows=1)
 		apply_user_styles(builder, {"borders": {}})
-		self.assertEqual(builder.row_styles, {})
+		self.assertEqual(builder.cell_styles, {})
 
 	def test_borders_only_scope_provided_uses_default_thin_style(self):
 		"""borders={'scope': '...'} is non-empty, so it applies with default 'thin' style"""
 		builder = self._make_builder(num_data_rows=1)
 		apply_user_styles(builder, {"borders": {"scope": "header_only"}})
-		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 1)
+		self.assertEqual(self._merge_cell_styles(builder, builder.header_index).get("border"), 1)
 
 	def test_zebra_stripes_without_color_is_noop(self):
 		"""zebra_stripes dict without 'color' should not apply any styling"""
 		builder = self._make_builder(num_data_rows=2)
 		apply_user_styles(builder, {"zebra_stripes": {}})
-		self.assertEqual(builder.row_styles, {})
+		self.assertEqual(builder.cell_styles, {})
 
 	def test_invalid_color_propagates_validation_error(self):
 		builder = self._make_builder()
@@ -616,10 +650,10 @@ class TestApplyUserStyles(UnitTestCase):
 			user_styles={"borders": {"style": "thin"}},
 		)
 
-		# header row should have a border style attached
-		header_style_ids = styles["row_styles"].get(0, [])
+		# header cell at (0, 0) should have a border style attached
+		header_cell_style_ids = styles["cell_styles"].get((0, 0), [])
 		merged = {}
-		for sid in header_style_ids:
+		for sid in header_cell_style_ids:
 			merged.update(styles["styles"][sid])
 		self.assertEqual(merged.get("border"), 1)
 
