@@ -27,6 +27,9 @@ ILLEGAL_CHARACTERS_RE = re.compile(
 INVALID_SHEET_NAME_RE = re.compile(r"[\[\]:*?/\\]")
 MAX_SHEET_NAME_LENGTH = 31
 
+# 6-char hex color, optional leading '#', case-insensitive
+HEX_COLOR_RE = re.compile(r"^#?[0-9A-Fa-f]{6}$")
+
 
 ### XLSX Formatter ###
 @dataclass(slots=True)
@@ -103,6 +106,19 @@ class XLSXStyleBuilder:
 		*frappe.model.numeric_fieldtypes,
 		*frappe.model.datetime_fields,
 		"Rating",
+	}
+
+	# Map user-friendly border names to xlsxwriter border style integers.
+	# See: https://xlsxwriter.readthedocs.io/format.html#set_border
+	BORDER_STYLE_MAP: ClassVar[dict[str, int]] = {
+		"none": 0,
+		"thin": 1,
+		"medium": 2,
+		"dashed": 3,
+		"dotted": 4,
+		"thick": 5,
+		"double": 6,
+		"hair": 7,
 	}
 
 	def __init__(self, metadata: XLSXMetadata, default_styling: bool = True):
@@ -362,6 +378,120 @@ class XLSXStyleBuilder:
 				style_cell(row_idx, col_idx, register_currency_style(currency or default_currency))
 
 		return self
+
+	### USER-CONFIGURABLE STYLING ###
+	def style_header_appearance(
+		self,
+		bg_color: str | None = None,
+		font_color: str | None = None,
+		font_size: int | None = None,
+	):
+		"""
+		Apply visual appearance overrides to the header row.
+
+		These styles stack on top of the default header styling (bold + alignment)
+		applied by `style_header()`.
+
+		Args:
+			bg_color: Background hex color (e.g. "#4472C4" or "4472C4").
+			font_color: Font hex color.
+			font_size: Font size in points (positive integer).
+		"""
+		style: dict = {}
+
+		if bg_color:
+			style["bg_color"] = self._normalize_color(bg_color)
+		if font_color:
+			style["font_color"] = self._normalize_color(font_color)
+		if font_size is not None:
+			if not isinstance(font_size, int) or font_size <= 0:
+				frappe.throw(_("XLSX font_size must be a positive integer"))
+			style["font_size"] = font_size
+
+		if not style:
+			return self
+
+		self.style_row(self.header_index, self.register_style(style))
+		return self
+
+	def apply_borders(
+		self,
+		border_style: str | int = "thin",
+		scope: Literal["all", "header_only", "data_only"] = "all",
+	):
+		"""
+		Apply borders to header and/or data cells.
+
+		Args:
+			border_style: One of `BORDER_STYLE_MAP` keys (e.g. "thin", "medium", "thick")
+				or a raw xlsxwriter border integer (0-13). "none"/0 is a no-op.
+			scope: Which rows receive borders.
+				- "all": header + all data rows (incl. total row)
+				- "header_only": only the header row
+				- "data_only": only data rows
+		"""
+		if isinstance(border_style, str):
+			border_value = self.BORDER_STYLE_MAP.get(border_style)
+			if border_value is None:
+				frappe.throw(
+					_("Invalid border style: {0}. Allowed: {1}").format(
+						border_style, ", ".join(self.BORDER_STYLE_MAP.keys())
+					)
+				)
+		else:
+			border_value = int(border_style)
+
+		if border_value == 0:
+			return self
+
+		border_id = self.register_style({"border": border_value})
+
+		if scope in ("all", "header_only"):
+			self.style_row(self.header_index, border_id)
+
+		if scope in ("all", "data_only"):
+			for row_idx in self.metadata.row_map:
+				self.style_row(row_idx, border_id)
+
+		return self
+
+	def apply_zebra_stripes(self, color: str = "#F2F2F2"):
+		"""
+		Apply alternating background color to data rows.
+
+		Stripes every second data row (i.e. 2nd, 4th, 6th... in display order).
+		The total row is skipped when `metadata.has_total_row` is set, so its
+		bold styling remains visually distinct.
+
+		Args:
+			color: Background hex color for striped rows.
+		"""
+		style_id = self.register_style({"bg_color": self._normalize_color(color)})
+
+		skip_last_row = self.metadata.has_total_row
+		last_row_index = self.last_row_index
+
+		for i, row_idx in enumerate(sorted(self.metadata.row_map.keys())):
+			if skip_last_row and row_idx == last_row_index:
+				continue
+			# stripe every second row (leave 1st, 3rd, ... unstriped)
+			if i % 2 == 1:
+				self.style_row(row_idx, style_id)
+
+		return self
+
+	@staticmethod
+	def _normalize_color(color: str) -> str:
+		"""
+		Validate and normalize a hex color string for xlsxwriter.
+
+		Accepts "#RRGGBB" or "RRGGBB"; returns the form prefixed with "#".
+		"""
+		if not isinstance(color, str) or not HEX_COLOR_RE.match(color.strip()):
+			frappe.throw(_("Invalid hex color: {0}").format(color))
+
+		color = color.strip()
+		return color if color.startswith("#") else f"#{color}"
 
 	@staticmethod
 	def _get_currency_symbol_info(currency: str | None) -> tuple[str, bool]:

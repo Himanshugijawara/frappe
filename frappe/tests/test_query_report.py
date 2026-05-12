@@ -3,7 +3,7 @@
 
 import frappe
 from frappe.desk.query_report import build_xlsx_data, export_query, run
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 from frappe.utils.xlsxutils import XLSXMetadata, XLSXStyleBuilder, make_xlsx
 
 
@@ -350,6 +350,160 @@ data = columns, result
 		self.assertTrue(email_queue, "Email was not enqueued")
 
 		frappe.delete_doc("Report", REPORT_NAME, delete_permanently=True)
+
+
+class TestXLSXStyleBuilderUserStyles(UnitTestCase):
+	"""
+	DB-free tests for the user-configurable XLSXStyleBuilder methods:
+	- style_header_appearance
+	- apply_borders
+	- apply_zebra_stripes
+	- _normalize_color
+	"""
+
+	def _make_builder(
+		self,
+		num_data_rows: int = 3,
+		has_total_row: bool = False,
+		applied_filters: dict | None = None,
+	) -> XLSXStyleBuilder:
+		"""Helper: build an XLSXStyleBuilder with simple mock metadata."""
+		column_map = {
+			0: {"fieldname": "name", "fieldtype": "Data", "label": "Name"},
+			1: {"fieldname": "score", "fieldtype": "Float", "label": "Score"},
+		}
+		# header at row 0 (no filters), data starts at row 1
+		row_map = {i + 1: {"name": f"r{i}", "score": float(i)} for i in range(num_data_rows)}
+
+		metadata = XLSXMetadata(
+			column_map=column_map,
+			row_map=row_map,
+			applied_filters_map=applied_filters or {},
+			has_total_row=has_total_row,
+		)
+		return XLSXStyleBuilder(metadata, default_styling=False)
+
+	@staticmethod
+	def _merge_row_styles(builder: XLSXStyleBuilder, row_idx: int) -> dict:
+		"""Merge all style dicts applied to a row into one dict."""
+		merged: dict = {}
+		for sid in builder.row_styles.get(row_idx, []):
+			merged.update(builder.styles[sid])
+		return merged
+
+	def test_style_header_appearance(self):
+		"""style_header_appearance stacks bg/font/size styles onto the header row"""
+		builder = self._make_builder()
+		builder.style_header_appearance(bg_color="#4472C4", font_color="FFFFFF", font_size=12)
+
+		merged = self._merge_row_styles(builder, builder.header_index)
+		self.assertEqual(merged.get("bg_color"), "#4472C4")
+		self.assertEqual(merged.get("font_color"), "#FFFFFF")  # normalized with '#'
+		self.assertEqual(merged.get("font_size"), 12)
+
+	def test_style_header_appearance_noop_when_all_none(self):
+		"""style_header_appearance with no args registers no new style"""
+		builder = self._make_builder()
+		styles_before = len(builder.styles)
+		builder.style_header_appearance()
+		self.assertEqual(len(builder.styles), styles_before)
+
+	def test_style_header_appearance_invalid_font_size(self):
+		builder = self._make_builder()
+		with self.assertRaises(frappe.ValidationError):
+			builder.style_header_appearance(font_size=0)
+		with self.assertRaises(frappe.ValidationError):
+			builder.style_header_appearance(font_size=-5)
+
+	def test_apply_borders_default_all_scope(self):
+		"""apply_borders('thin') applies border to header + every data row"""
+		builder = self._make_builder(num_data_rows=3)
+		builder.apply_borders(border_style="thin")
+
+		header_merged = self._merge_row_styles(builder, builder.header_index)
+		self.assertEqual(header_merged.get("border"), 1)
+
+		for row_idx in builder.metadata.row_map:
+			merged = self._merge_row_styles(builder, row_idx)
+			self.assertEqual(merged.get("border"), 1, f"row {row_idx} missing border")
+
+	def test_apply_borders_header_only(self):
+		builder = self._make_builder(num_data_rows=2)
+		builder.apply_borders(border_style="medium", scope="header_only")
+
+		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 2)
+		for row_idx in builder.metadata.row_map:
+			self.assertNotIn("border", self._merge_row_styles(builder, row_idx))
+
+	def test_apply_borders_data_only(self):
+		builder = self._make_builder(num_data_rows=2)
+		builder.apply_borders(border_style="thick", scope="data_only")
+
+		self.assertNotIn("border", self._merge_row_styles(builder, builder.header_index))
+		for row_idx in builder.metadata.row_map:
+			self.assertEqual(self._merge_row_styles(builder, row_idx).get("border"), 5)
+
+	def test_apply_borders_none_is_noop(self):
+		builder = self._make_builder()
+		styles_before = len(builder.styles)
+		builder.apply_borders(border_style="none")
+		self.assertEqual(len(builder.styles), styles_before)
+		self.assertEqual(builder.row_styles, {})
+
+	def test_apply_borders_invalid_style_raises(self):
+		builder = self._make_builder()
+		with self.assertRaises(frappe.ValidationError):
+			builder.apply_borders(border_style="bogus")
+
+	def test_apply_borders_accepts_int(self):
+		builder = self._make_builder(num_data_rows=1)
+		builder.apply_borders(border_style=2)
+		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 2)
+
+	def test_apply_zebra_stripes(self):
+		"""apply_zebra_stripes stripes every 2nd data row"""
+		builder = self._make_builder(num_data_rows=4)  # rows 1,2,3,4
+		builder.apply_zebra_stripes(color="#EEEEEE")
+
+		# i=0 (row 1) unstriped, i=1 (row 2) striped, i=2 (row 3) unstriped, i=3 (row 4) striped
+		self.assertNotIn("bg_color", self._merge_row_styles(builder, 1))
+		self.assertEqual(self._merge_row_styles(builder, 2).get("bg_color"), "#EEEEEE")
+		self.assertNotIn("bg_color", self._merge_row_styles(builder, 3))
+		self.assertEqual(self._merge_row_styles(builder, 4).get("bg_color"), "#EEEEEE")
+
+	def test_apply_zebra_stripes_skips_total_row(self):
+		"""When has_total_row is set, the last row never receives stripes"""
+		builder = self._make_builder(num_data_rows=4, has_total_row=True)
+		builder.apply_zebra_stripes(color="F2F2F2")
+
+		self.assertNotIn("bg_color", self._merge_row_styles(builder, 4))
+
+	def test_apply_zebra_stripes_invalid_color_raises(self):
+		builder = self._make_builder()
+		with self.assertRaises(frappe.ValidationError):
+			builder.apply_zebra_stripes(color="not-a-color")
+		with self.assertRaises(frappe.ValidationError):
+			builder.apply_zebra_stripes(color="#GGGGGG")
+
+	def test_normalize_color_accepts_with_and_without_hash(self):
+		self.assertEqual(XLSXStyleBuilder._normalize_color("#abcdef"), "#abcdef")
+		self.assertEqual(XLSXStyleBuilder._normalize_color("ABCDEF"), "#ABCDEF")
+		self.assertEqual(XLSXStyleBuilder._normalize_color("  #123abc  "), "#123abc")
+
+	def test_user_styles_chain(self):
+		"""All three user-configurable methods can be chained together cleanly"""
+		builder = self._make_builder(num_data_rows=2)
+		result = (
+			builder.style_header_appearance(bg_color="4472C4", font_color="FFFFFF")
+			.apply_borders(border_style="thin")
+			.apply_zebra_stripes(color="F2F2F2")
+		)
+		self.assertIs(result, builder)
+
+		header_merged = self._merge_row_styles(builder, builder.header_index)
+		self.assertEqual(header_merged.get("bg_color"), "#4472C4")
+		self.assertEqual(header_merged.get("font_color"), "#FFFFFF")
+		self.assertEqual(header_merged.get("border"), 1)
 
 
 def create_mock_data():
