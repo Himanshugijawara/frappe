@@ -567,6 +567,63 @@ class XLSXStyleBuilder:
 		return f"{XLSXStyleBuilder.get_date_format()} {XLSXStyleBuilder.get_time_format()}"
 
 
+def apply_user_styles(builder: XLSXStyleBuilder, options: dict | None) -> XLSXStyleBuilder:
+	"""
+	Apply user-supplied styling options to an existing `XLSXStyleBuilder`.
+
+	This is the bridge between the export-time UI (which produces a plain dict
+	of styling preferences) and the builder's typed API. Unknown keys and
+	missing values are silently ignored so the dict can grow over time without
+	breaking older callers.
+
+	Expected `options` shape (all keys optional):
+
+		{
+			"header": {
+				"bg_color": "#4472C4",
+				"font_color": "#FFFFFF",
+				"font_size": 12,
+			},
+			"borders": {
+				"style": "thin",   # one of XLSXStyleBuilder.BORDER_STYLE_MAP
+				"scope": "all",    # "all" | "header_only" | "data_only"
+			},
+			"zebra_stripes": {
+				"color": "#F2F2F2",
+			},
+		}
+
+	Args:
+		builder: The `XLSXStyleBuilder` to mutate.
+		options: User styling preferences, typically deserialized from the
+			export dialog. Falsy values (`None`, `{}`) are no-ops.
+
+	Returns:
+		The same `builder` instance, for chaining.
+	"""
+	if not options or not isinstance(options, dict):
+		return builder
+
+	if (header := options.get("header")) and isinstance(header, dict):
+		builder.style_header_appearance(
+			bg_color=header.get("bg_color"),
+			font_color=header.get("font_color"),
+			font_size=header.get("font_size"),
+		)
+
+	if (borders := options.get("borders")) and isinstance(borders, dict):
+		builder.apply_borders(
+			border_style=borders.get("style", "thin"),
+			scope=borders.get("scope", "all"),
+		)
+
+	if (zebra := options.get("zebra_stripes")) and isinstance(zebra, dict):
+		if color := zebra.get("color"):
+			builder.apply_zebra_stripes(color=color)
+
+	return builder
+
+
 def get_default_xlsx_styles(
 	columns: list[dict],
 	data: list[list | dict],
@@ -575,6 +632,7 @@ def get_default_xlsx_styles(
 	has_total_row: bool = False,
 	has_indentation: bool = False,
 	currency_formatting: bool = True,
+	user_styles: dict | None = None,
 ) -> dict:
 	"""
 	Generate default XLSX styles for xlsx exports.
@@ -586,6 +644,8 @@ def get_default_xlsx_styles(
 		has_total_row: If True, applies bold styling to the last row.
 		has_indentation: If True, applies indent styles based on row's 'indent' key.
 		currency_formatting: If True, applies currency number formats to Currency fields.
+		user_styles: Optional user-supplied styling overrides applied on top of the
+			defaults. See `apply_user_styles` for the expected shape.
 	"""
 	applied_filters = applied_filters or []
 	header_index = len(applied_filters) + 1 if applied_filters else 0
@@ -602,7 +662,9 @@ def get_default_xlsx_styles(
 		has_indentation=has_indentation,
 	)
 
-	return XLSXStyleBuilder(metadata, default_styling=False).apply_default_styles(currency_formatting).result
+	builder = XLSXStyleBuilder(metadata, default_styling=False).apply_default_styles(currency_formatting)
+	apply_user_styles(builder, user_styles)
+	return builder.result
 
 
 ### Excel Creation ###

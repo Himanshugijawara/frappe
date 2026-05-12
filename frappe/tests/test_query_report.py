@@ -4,7 +4,13 @@
 import frappe
 from frappe.desk.query_report import build_xlsx_data, export_query, run
 from frappe.tests import IntegrationTestCase, UnitTestCase
-from frappe.utils.xlsxutils import XLSXMetadata, XLSXStyleBuilder, make_xlsx
+from frappe.utils.xlsxutils import (
+	XLSXMetadata,
+	XLSXStyleBuilder,
+	apply_user_styles,
+	get_default_xlsx_styles,
+	make_xlsx,
+)
 
 
 class TestQueryReport(IntegrationTestCase):
@@ -504,6 +510,118 @@ class TestXLSXStyleBuilderUserStyles(UnitTestCase):
 		self.assertEqual(header_merged.get("bg_color"), "#4472C4")
 		self.assertEqual(header_merged.get("font_color"), "#FFFFFF")
 		self.assertEqual(header_merged.get("border"), 1)
+
+
+class TestApplyUserStyles(UnitTestCase):
+	"""DB-free tests for the `apply_user_styles` bridge function."""
+
+	def _make_builder(self, num_data_rows: int = 3, has_total_row: bool = False) -> XLSXStyleBuilder:
+		column_map = {0: {"fieldname": "name", "fieldtype": "Data", "label": "Name"}}
+		row_map = {i + 1: {"name": f"r{i}"} for i in range(num_data_rows)}
+		metadata = XLSXMetadata(
+			column_map=column_map,
+			row_map=row_map,
+			has_total_row=has_total_row,
+		)
+		return XLSXStyleBuilder(metadata, default_styling=False)
+
+	@staticmethod
+	def _merge_row_styles(builder: XLSXStyleBuilder, row_idx: int) -> dict:
+		merged: dict = {}
+		for sid in builder.row_styles.get(row_idx, []):
+			merged.update(builder.styles[sid])
+		return merged
+
+	def test_none_options_is_noop(self):
+		builder = self._make_builder()
+		styles_before = len(builder.styles)
+		result = apply_user_styles(builder, None)
+		self.assertIs(result, builder)
+		self.assertEqual(len(builder.styles), styles_before)
+
+	def test_empty_options_is_noop(self):
+		builder = self._make_builder()
+		apply_user_styles(builder, {})
+		self.assertEqual(builder.row_styles, {})
+
+	def test_non_dict_options_is_noop(self):
+		builder = self._make_builder()
+		apply_user_styles(builder, "not-a-dict")  # type: ignore[arg-type]
+		self.assertEqual(builder.row_styles, {})
+
+	def test_full_options_apply_all_three_sections(self):
+		builder = self._make_builder(num_data_rows=4)
+		apply_user_styles(
+			builder,
+			{
+				"header": {"bg_color": "#4472C4", "font_color": "FFFFFF", "font_size": 14},
+				"borders": {"style": "medium", "scope": "all"},
+				"zebra_stripes": {"color": "#F2F2F2"},
+			},
+		)
+
+		header_merged = self._merge_row_styles(builder, builder.header_index)
+		self.assertEqual(header_merged.get("bg_color"), "#4472C4")
+		self.assertEqual(header_merged.get("font_color"), "#FFFFFF")
+		self.assertEqual(header_merged.get("font_size"), 14)
+		self.assertEqual(header_merged.get("border"), 2)
+
+		# at least one data row should have border + a striped row exists
+		row2_merged = self._merge_row_styles(builder, 2)
+		self.assertEqual(row2_merged.get("border"), 2)
+		self.assertEqual(row2_merged.get("bg_color"), "#F2F2F2")
+
+	def test_partial_options_only_apply_present_sections(self):
+		builder = self._make_builder(num_data_rows=2)
+		apply_user_styles(builder, {"borders": {"style": "thin"}})
+
+		# borders applied
+		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 1)
+		# header appearance NOT applied
+		header_merged = self._merge_row_styles(builder, builder.header_index)
+		self.assertNotIn("bg_color", header_merged)
+		self.assertNotIn("font_size", header_merged)
+
+	def test_borders_empty_dict_is_noop(self):
+		"""borders={} is treated as no-op so users must explicitly opt in via the dialog"""
+		builder = self._make_builder(num_data_rows=1)
+		apply_user_styles(builder, {"borders": {}})
+		self.assertEqual(builder.row_styles, {})
+
+	def test_borders_only_scope_provided_uses_default_thin_style(self):
+		"""borders={'scope': '...'} is non-empty, so it applies with default 'thin' style"""
+		builder = self._make_builder(num_data_rows=1)
+		apply_user_styles(builder, {"borders": {"scope": "header_only"}})
+		self.assertEqual(self._merge_row_styles(builder, builder.header_index).get("border"), 1)
+
+	def test_zebra_stripes_without_color_is_noop(self):
+		"""zebra_stripes dict without 'color' should not apply any styling"""
+		builder = self._make_builder(num_data_rows=2)
+		apply_user_styles(builder, {"zebra_stripes": {}})
+		self.assertEqual(builder.row_styles, {})
+
+	def test_invalid_color_propagates_validation_error(self):
+		builder = self._make_builder()
+		with self.assertRaises(frappe.ValidationError):
+			apply_user_styles(builder, {"header": {"bg_color": "invalid"}})
+
+	def test_get_default_xlsx_styles_with_user_styles(self):
+		"""End-to-end: get_default_xlsx_styles honors user_styles kwarg"""
+		columns = [{"fieldname": "name", "fieldtype": "Data", "label": "Name"}]
+		data = [{"name": "a"}, {"name": "b"}, {"name": "c"}]
+
+		styles = get_default_xlsx_styles(
+			columns=columns,
+			data=data,
+			user_styles={"borders": {"style": "thin"}},
+		)
+
+		# header row should have a border style attached
+		header_style_ids = styles["row_styles"].get(0, [])
+		merged = {}
+		for sid in header_style_ids:
+			merged.update(styles["styles"][sid])
+		self.assertEqual(merged.get("border"), 1)
 
 
 def create_mock_data():

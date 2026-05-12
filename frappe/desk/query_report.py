@@ -18,7 +18,13 @@ from frappe.monitor import add_data_to_monitor
 from frappe.permissions import get_role_permissions, get_roles, has_permission
 from frappe.utils import cint, cstr, flt, format_datetime, format_duration, formatdate, get_html_format, sbool
 from frappe.utils.caching import request_cache
-from frappe.utils.xlsxutils import XLSXMetadata, XLSXStyleBuilder, handle_html, make_xlsx
+from frappe.utils.xlsxutils import (
+	XLSXMetadata,
+	XLSXStyleBuilder,
+	apply_user_styles,
+	handle_html,
+	make_xlsx,
+)
 
 
 def get_report_doc(report_name):
@@ -420,12 +426,17 @@ def _export_query(form_params, csv_params, populate_response=True):
 
 	format_fields(data)
 
+	xlsx_user_style = form_params.get("xlsx_user_style")
+	if isinstance(xlsx_user_style, str):
+		xlsx_user_style = frappe.parse_json(xlsx_user_style) if xlsx_user_style else None
+
 	xlsx_data, column_widths, styles = build_xlsx_data(
 		data,
 		include_indentation=include_indentation,
 		include_filters=include_filters,
 		include_hidden_columns=include_hidden_columns,
 		build_styles=file_format_type == "Excel",
+		xlsx_user_style=xlsx_user_style,
 	)
 
 	if file_format_type == "CSV":
@@ -512,6 +523,7 @@ def build_xlsx_data(
 	include_hidden_columns: bool = False,
 	*,
 	build_styles: bool = False,
+	xlsx_user_style: dict | None = None,
 ) -> tuple[list[list[Any]], list[int], dict | None]:
 	"""
 	Build Excel data structure from report data with proper formatting.
@@ -524,6 +536,9 @@ def build_xlsx_data(
 		ignore_visible_idx: Deprecated (v17). Skips visible_idx filtering.
 		include_hidden_columns: Whether to include columns marked as hidden
 		build_styles: Whether to build style metadata for Excel formatting
+		xlsx_user_style: Optional user-supplied styling overrides (header colors,
+			borders, zebra stripes). Only honored when `build_styles` is True. See
+			`frappe.utils.xlsxutils.apply_user_styles` for the expected shape.
 
 	Returns:
 		tuple: A tuple containing:
@@ -658,24 +673,34 @@ def build_xlsx_data(
 
 		result.append(row_data)
 
-	return result, column_widths, get_xlsx_styles(metadata, data.report_name) if build_styles else None
+	return result, column_widths, (
+		get_xlsx_styles(metadata, data.report_name, user_styles=xlsx_user_style) if build_styles else None
+	)
 
 
-def get_xlsx_styles(metadata: XLSXMetadata, report_name: str | None = None) -> dict | None:
+def get_xlsx_styles(
+	metadata: XLSXMetadata,
+	report_name: str | None = None,
+	user_styles: dict | None = None,
+) -> dict | None:
 	"""
 	Returns styles for XLSX export.
 
 	If report_name is provided, it tries to fetch styles defined in the report's module.
+	Per-report developer styles take precedence over `user_styles`; when no module
+	styles are defined, `user_styles` is layered on top of the default styling.
 	"""
 	styles = None
 	if report_name:
 		report = frappe.get_doc("Report", report_name)
 		styles = report.get_xlsx_styles_from_module(metadata)
 
-	if not styles:
-		styles = XLSXStyleBuilder(metadata).result
+	if styles:
+		return styles
 
-	return styles
+	builder = XLSXStyleBuilder(metadata)
+	apply_user_styles(builder, user_styles)
+	return builder.result
 
 
 def add_total_row(

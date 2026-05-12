@@ -427,6 +427,10 @@ def _export_query(form_params, csv_params, populate_response=True):
 	add_totals_row = 1 if form_params.pop("add_totals_row", None) == "1" else None
 	translate_values = 1 if form_params.pop("translate_values", None) == "1" else None
 
+	xlsx_user_style = form_params.pop("xlsx_user_style", None)
+	if isinstance(xlsx_user_style, str):
+		xlsx_user_style = frappe.parse_json(xlsx_user_style) if xlsx_user_style else None
+
 	if selection := form_params.pop("selected_items", None):
 		form_params["filters"] = {"name": ("in", json.loads(selection))}
 
@@ -494,6 +498,7 @@ def _export_query(form_params, csv_params, populate_response=True):
 			],
 			data=data[1:],  # exclude header row
 			has_total_row=bool(add_totals_row),
+			user_styles=xlsx_user_style,
 		)
 
 		content = make_xlsx(data, doctype, styles=styles).getvalue()
