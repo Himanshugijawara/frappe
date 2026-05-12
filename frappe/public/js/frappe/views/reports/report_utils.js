@@ -187,6 +187,113 @@ frappe.report_utils = {
 			},
 			{
 				fieldtype: "Section Break",
+				fieldname: "xlsx_style_section",
+				label: __("Excel Styling"),
+				collapsible: 1,
+				collapsible_depends_on: "eval:1",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Check",
+				fieldname: "xlsx_style_header_enable",
+				label: __("Customize header"),
+				default: 0,
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Color",
+				fieldname: "xlsx_header_bg_color",
+				label: __("Header background"),
+				default: "#4472C4",
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_header_enable",
+			},
+			{
+				fieldtype: "Int",
+				fieldname: "xlsx_header_font_size",
+				label: __("Header font size"),
+				default: 11,
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_header_enable",
+			},
+			{
+				fieldtype: "Column Break",
+				fieldname: "xlsx_style_col_break_1",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Color",
+				fieldname: "xlsx_header_font_color",
+				label: __("Header text color"),
+				default: "#FFFFFF",
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_style_header_enable",
+			},
+			{
+				fieldtype: "Section Break",
+				fieldname: "xlsx_borders_section",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Check",
+				fieldname: "xlsx_borders_enable",
+				label: __("Add borders"),
+				default: 0,
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Select",
+				fieldname: "xlsx_border_style",
+				label: __("Border style"),
+				options: ["thin", "medium", "thick", "dashed", "dotted", "double", "hair"],
+				default: "thin",
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_borders_enable",
+			},
+			{
+				fieldtype: "Column Break",
+				fieldname: "xlsx_style_col_break_2",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Select",
+				fieldname: "xlsx_border_scope",
+				label: __("Apply borders to"),
+				options: [
+					{ value: "all", label: __("Header + Data") },
+					{ value: "header_only", label: __("Header only") },
+					{ value: "data_only", label: __("Data only") },
+				],
+				default: "all",
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_borders_enable",
+			},
+			{
+				fieldtype: "Section Break",
+				fieldname: "xlsx_zebra_section",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Check",
+				fieldname: "xlsx_zebra_enable",
+				label: __("Alternate row colors"),
+				default: 0,
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Color",
+				fieldname: "xlsx_zebra_color",
+				label: __("Stripe color"),
+				default: "#F2F2F2",
+				depends_on: "eval:doc.file_format=='Excel' && doc.xlsx_zebra_enable",
+			},
+			{
+				fieldtype: "Section Break",
+				fieldname: "xlsx_preview_section",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "HTML",
+				fieldname: "xlsx_preview",
+				depends_on: "eval:doc.file_format=='Excel'",
+			},
+			{
+				fieldtype: "Section Break",
 				fieldname: "csv_settings",
 				label: "Settings",
 				collapsible: 1,
@@ -272,7 +379,59 @@ frappe.report_utils = {
 			);
 		}
 
-		dialog.fields_dict["file_format"].df.onchange = () => update_csv_preview(dialog);
+		function update_xlsx_preview(dialog) {
+			const wrapper = dialog.fields_dict["xlsx_preview"]?.$wrapper;
+			if (!wrapper) return;
+
+			const v = dialog.get_values(true) || {};
+
+			const header_enabled = !!v.xlsx_style_header_enable;
+			const borders_enabled = !!v.xlsx_borders_enable;
+			const zebra_enabled = !!v.xlsx_zebra_enable;
+
+			const header_bg = header_enabled ? v.xlsx_header_bg_color || "#4472C4" : "transparent";
+			const header_fg = header_enabled ? v.xlsx_header_font_color || "#FFFFFF" : "inherit";
+			const header_size = header_enabled ? cint(v.xlsx_header_font_size) || 11 : 11;
+
+			const border_scope = v.xlsx_border_scope || "all";
+			const header_has_border =
+				borders_enabled && (border_scope === "all" || border_scope === "header_only");
+			const data_has_border =
+				borders_enabled && (border_scope === "all" || border_scope === "data_only");
+
+			const border_css = "1px solid #6c757d";
+			const header_border_css = header_has_border ? border_css : "none";
+			const data_border_css = data_has_border ? border_css : "none";
+			const zebra_color = zebra_enabled ? v.xlsx_zebra_color || "#F2F2F2" : "transparent";
+
+			const cell_pad = "padding: 6px 10px;";
+			const header_style = `background:${header_bg};color:${header_fg};font-weight:600;font-size:${header_size}px;border:${header_border_css};${cell_pad}`;
+			const row_style = (striped) =>
+				`background:${striped ? zebra_color : "transparent"};border:${data_border_css};${cell_pad}`;
+
+			wrapper.html(`
+				<div class="text-muted small" style="margin-bottom:6px;">${__("Preview")}</div>
+				<table style="border-collapse:collapse;width:100%;font-size:13px;">
+					<thead>
+						<tr>
+							<th style="${header_style}">${__("Name")}</th>
+							<th style="${header_style}">${__("Score")}</th>
+							<th style="${header_style}">${__("Status")}</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr><td style="${row_style(false)}">Alpha</td><td style="${row_style(false)}">100</td><td style="${row_style(false)}">Open</td></tr>
+						<tr><td style="${row_style(true)}">Beta</td><td style="${row_style(true)}">200</td><td style="${row_style(true)}">Closed</td></tr>
+						<tr><td style="${row_style(false)}">Gamma</td><td style="${row_style(false)}">300</td><td style="${row_style(false)}">Open</td></tr>
+					</tbody>
+				</table>
+			`);
+		}
+
+		dialog.fields_dict["file_format"].df.onchange = () => {
+			update_csv_preview(dialog);
+			update_xlsx_preview(dialog);
+		};
 		dialog.fields_dict["csv_quoting"].df.onchange = () => update_csv_preview(dialog);
 		dialog.fields_dict["csv_delimiter"].df.onchange = () => {
 			if (!dialog.get_value("csv_delimiter")) {
@@ -287,7 +446,68 @@ frappe.report_utils = {
 			update_csv_preview(dialog);
 		};
 
+		// hook every XLSX styling field to refresh the preview
+		const xlsx_preview_fields = [
+			"xlsx_style_header_enable",
+			"xlsx_header_bg_color",
+			"xlsx_header_font_color",
+			"xlsx_header_font_size",
+			"xlsx_borders_enable",
+			"xlsx_border_style",
+			"xlsx_border_scope",
+			"xlsx_zebra_enable",
+			"xlsx_zebra_color",
+		];
+		xlsx_preview_fields.forEach((fieldname) => {
+			const field = dialog.fields_dict[fieldname];
+			if (field) {
+				field.df.onchange = () => update_xlsx_preview(dialog);
+			}
+		});
+
+		// render the initial preview once the dialog is shown
+		const _orig_show = dialog.show.bind(dialog);
+		dialog.show = function () {
+			_orig_show();
+			update_xlsx_preview(dialog);
+		};
+
 		return dialog;
+	},
+
+	build_xlsx_user_style(values) {
+		/**
+		 * Convert flat dialog field values into the structured dict expected by
+		 * `frappe.utils.xlsxutils.apply_user_styles` on the backend.
+		 *
+		 * Returns null when no styling has been opted-in, so the caller can omit
+		 * the form param entirely and preserve existing default-export behaviour.
+		 */
+		if (!values || values.file_format !== "Excel") return null;
+
+		const style = {};
+
+		if (values.xlsx_style_header_enable) {
+			const header = {};
+			if (values.xlsx_header_bg_color) header.bg_color = values.xlsx_header_bg_color;
+			if (values.xlsx_header_font_color) header.font_color = values.xlsx_header_font_color;
+			const font_size = cint(values.xlsx_header_font_size);
+			if (font_size > 0) header.font_size = font_size;
+			if (Object.keys(header).length) style.header = header;
+		}
+
+		if (values.xlsx_borders_enable) {
+			style.borders = {
+				style: values.xlsx_border_style || "thin",
+				scope: values.xlsx_border_scope || "all",
+			};
+		}
+
+		if (values.xlsx_zebra_enable && values.xlsx_zebra_color) {
+			style.zebra_stripes = { color: values.xlsx_zebra_color };
+		}
+
+		return Object.keys(style).length ? style : null;
 	},
 
 	get_csv_preview(data, quoting, delimiter, decimal_sep) {

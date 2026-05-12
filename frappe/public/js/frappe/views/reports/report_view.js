@@ -1793,6 +1793,14 @@ frappe.views.ReportView = class ReportView extends frappe.views.ListView {
 								delete args.page_length;
 							}
 							args.export_in_background = data.export_in_background;
+
+							// attach user-supplied XLSX styling, if any
+							const xlsx_user_style =
+								frappe.report_utils.build_xlsx_user_style(data);
+							if (xlsx_user_style) {
+								args.xlsx_user_style = JSON.stringify(xlsx_user_style);
+							}
+
 							if (data.export_in_background) {
 								frappe.call({
 									method: args.cmd,

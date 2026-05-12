@@ -1823,6 +1823,15 @@ frappe.views.QueryReport = class QueryReport extends frappe.views.BaseList {
 					export_in_background,
 					include_hidden_columns,
 				};
+
+				// attach user-supplied XLSX styling, if any
+				const xlsx_user_style = frappe.report_utils.build_xlsx_user_style(
+					this.export_dialog.get_values(true)
+				);
+				if (xlsx_user_style) {
+					args.xlsx_user_style = JSON.stringify(xlsx_user_style);
+				}
+
 				if (export_in_background) {
 					frappe.call({
 						method: args.cmd,
